@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>居酒屋ゲーム</title>
+    <style>
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+        background: radial-gradient(circle at 50% 0%, #7a2a14 0%, #2a120b 70%);
+        color: #fff4ec;
+        font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+        text-align: center;
+      }
+      h1 { margin: 0; font-size: 24px; letter-spacing: 0.04em; }
+      .lead { margin: 0; font-size: 15px; color: #f0cdb6; }
+      .tabs { display: flex; gap: 8px; width: min(92vw, 380px); }
+      .tab {
+        flex: 1;
+        min-height: 48px;
+        border: 2px solid #7a3a22;
+        border-radius: 14px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #f0cdb6;
+        background: transparent;
+        touch-action: manipulation;
+      }
+      .tab.active { color: #fff; border-color: #d9381e; background: #d9381e; }
+      section { display: none; flex-direction: column; align-items: center; gap: 16px; width: 100%; }
+      section.active { display: flex; }
+
+      .wheel-wrap { position: relative; width: min(86vw, 360px); aspect-ratio: 1; }
+      canvas { width: 100%; height: 100%; display: block; }
+      .pointer {
+        position: absolute;
+        top: -6px;
+        left: 50%;
+        width: 0;
+        height: 0;
+        transform: translateX(-50%);
+        border-left: 14px solid transparent;
+        border-right: 14px solid transparent;
+        border-top: 28px solid #ffd54f;
+        filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+      }
+      .primary {
+        width: min(86vw, 360px);
+        min-height: 64px;
+        border: 0;
+        border-radius: 18px;
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+        background: #d9381e;
+        touch-action: manipulation;
+      }
+      .primary:active { transform: scale(0.98); }
+      .primary:disabled { opacity: 0.5; }
+
+      .survey { width: min(92vw, 380px); display: flex; flex-direction: column; gap: 14px; text-align: left; }
+      .question { padding: 14px; border-radius: 14px; background: rgba(255, 244, 236, 0.08); }
+      .question h2 { margin: 0 0 10px; font-size: 16px; }
+      .option { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 4px; font-size: 16px; }
+      .option input { width: 22px; height: 22px; accent-color: #d9381e; }
+      .error { margin: 0; min-height: 1.4em; font-size: 14px; color: #ff9a8a; text-align: center; }
+
+      .coupon {
+        display: none;
+        width: min(92vw, 380px);
+        padding: 20px 18px;
+        border-radius: 16px;
+        color: #3a1a0c;
+        background: #fff4dc;
+        border: 3px dashed #d9381e;
+        animation: pop 0.4s ease;
+      }
+      .coupon.show { display: block; }
+      .coupon .label { font-size: 13px; color: #8a4a2a; }
+      .coupon .prize { margin: 6px 0; font-size: 28px; font-weight: 800; color: #d9381e; }
+      .coupon .note { font-size: 13px; color: #6b3a20; }
+      .coupon .qr { display: inline-block; margin-top: 12px; padding: 10px; border-radius: 10px; background: #fff; line-height: 0; }
+      .coupon .qr svg { width: 160px; height: 160px; display: block; }
+      .coupon .clock { margin-top: 10px; font-size: 20px; font-variant-numeric: tabular-nums; font-weight: 700; }
+      .coupon .code { font-size: 13px; color: #8a4a2a; }
+      .coupon.lose { border-color: #8a7a70; background: #efe6e0; }
+      .coupon.lose .prize { color: #6b5a50; }
+      @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+  </head>
+  <body>
+    <h1>🍺 居酒屋ゲーム</h1>
+    <p class="lead">遊んで、お得なクーポンをゲットしよう!</p>
+    <div class="tabs">
+      <button class="tab active" type="button" data-target="roulette">🎰 ルーレット</button>
+      <button class="tab" type="button" data-target="survey">📝 アンケート</button>
+    </div>
+
+    <section id="roulette" class="active">
+      <div class="wheel-wrap">
+        <div class="pointer"></div>
+        <canvas id="wheel" width="720" height="720"></canvas>
+      </div>
+      <button class="primary" id="spin" type="button">ルーレットを回す</button>
+      <div class="coupon" id="roulette-coupon"></div>
+    </section>
+
+    <section id="survey">
+      <form class="survey" id="survey-form" novalidate></form>
+      <p class="error" id="survey-error"></p>
+      <button class="primary" id="survey-submit" type="button">回答してクーポンをもらう</button>
+      <div class="coupon" id="survey-coupon"></div>
+    </section>
+
+    <script src="vendor/qrcode.js"></script>
+    <script>
+      // ===== 設定(店に合わせてここだけ書き換える) =====
+      // ルーレット: weight が大きいほど当たりやすい。coupon が null ならハズレ。
+      const PRIZES = [
+        { name: "ドリンク1杯無料", color: "#d9381e", weight: 1, coupon: "ドリンク1杯無料" },
+        { name: "おつまみ1品サービス", color: "#f29f05", weight: 2, coupon: "おつまみ1品サービス" },
+        { name: "ハズレ", color: "#5a4a42", weight: 3, coupon: null },
+        { name: "会計10%OFF", color: "#2e7d32", weight: 1, coupon: "お会計10%OFF" },
+        { name: "ドリンク半額", color: "#1565c0", weight: 2, coupon: "ドリンク半額(1杯)" },
+        { name: "ハズレ", color: "#7a665c", weight: 3, coupon: null },
+      ];
+      // アンケート: 全部答えるとクーポンが出る
+      const SURVEY = [
+        { q: "今日は何名で来ましたか?", options: ["1人", "2〜3人", "4人以上"] },
+        { q: "このお店を知ったきっかけは?", options: ["通りがかり", "友人・知人", "SNS・ネット", "その他"] },
+        { q: "今日のお店の満足度は?", options: ["とても満足", "満足", "ふつう", "もう少し"] },
+      ];
+      const SURVEY_COUPON = "ドリンク1杯無料";
+      const CAN_PLAY_ONCE = true; // 1台のスマホで、それぞれ1日1回だけ(デモで何度も試したいときは false)
+
+      // ===== 共通 =====
+      function todayText() {
+        const d = new Date();
+        return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+      }
+      function makeCode() {
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+      }
+      function loadSaved(key) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(key));
+          if (saved && saved.date === todayText()) return saved;
+        } catch {}
+        return null;
+      }
+      function save(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+      }
+      function escapeHtml(text) {
+        return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      }
+
+      // クーポンを描く。当たりのときは、店員が読み取れるQR(クーポン名・番号・日付)と動く時計を出す
+      const clockTimers = new Map();
+      function showCoupon(el, result) {
+        window.clearInterval(clockTimers.get(el));
+        const won = Boolean(result.prize);
+        el.classList.toggle("lose", !won);
+        if (!won) {
+          el.innerHTML = `<div class="label">残念!</div><div class="prize">また挑戦してね</div>
+            <div class="note">ご来店ありがとうございます。ゆっくりお楽しみください</div>`;
+          el.classList.add("show");
+          return;
+        }
+        el.innerHTML = `
+          <div class="label">${escapeHtml(result.title || "おめでとうございます!")}</div>
+          <div class="prize">${escapeHtml(result.prize)}</div>
+          <div class="note">${escapeHtml(result.date)} 当日限り有効。会計のときに、このQRをスタッフに見せてください</div>
+          <div class="qr" data-qr></div>
+          <div class="clock"></div>
+          <div class="code">クーポン番号 ${escapeHtml(result.code)}</div>`;
+        const qr = qrcode(0, "M");
+        qr.addData(`COUPON|${result.prize}|${result.code}|${result.date}`);
+        qr.make();
+        el.querySelector("[data-qr]").innerHTML = qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true });
+        // 動く時計を出して、スクリーンショットの使い回しを見分けやすくする
+        const clock = el.querySelector(".clock");
+        const tick = () => (clock.textContent = new Date().toLocaleTimeString("ja-JP"));
+        tick();
+        clockTimers.set(el, window.setInterval(tick, 1000));
+        el.classList.add("show");
+      }
+
+      // タブの切り替え
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+          document.querySelectorAll("section").forEach((s) => s.classList.toggle("active", s.id === tab.dataset.target));
+        });
+      });
+
+      // ===== ルーレット =====
+      const ROULETTE_KEY = "izakaya-roulette-result";
+      const canvas = document.getElementById("wheel");
+      const ctx = canvas.getContext("2d");
+      const spinBtn = document.getElementById("spin");
+      const rouletteCoupon = document.getElementById("roulette-coupon");
+      const N = PRIZES.length;
+      const SLICE = (Math.PI * 2) / N;
+      let rotation = 0; // 0 のとき、1番目の景品の中心が真上(ポインタ)に来る
+
+      function drawWheel() {
+        const r = canvas.width / 2;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(r, r);
+        ctx.rotate(rotation);
+        PRIZES.forEach((prize, i) => {
+          const start = -Math.PI / 2 - SLICE / 2 + i * SLICE;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, r - 6, start, start + SLICE);
+          ctx.closePath();
+          ctx.fillStyle = prize.color;
+          ctx.fill();
+          ctx.strokeStyle = "#fff4ec";
+          ctx.lineWidth = 4;
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(start + SLICE / 2);
+          ctx.textAlign = "right";
+          ctx.fillStyle = "#fff";
+          ctx.font = "700 36px system-ui, sans-serif";
+          ctx.fillText(prize.name, r - 36, 12);
+          ctx.restore();
+        });
+        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(r, r, 36, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff4ec";
+        ctx.fill();
+      }
+
+      function pickIndex() {
+        const total = PRIZES.reduce((sum, p) => sum + p.weight, 0);
+        let roll = Math.random() * total;
+        for (let i = 0; i < N; i++) {
+          roll -= PRIZES[i].weight;
+          if (roll < 0) return i;
+        }
+        return N - 1;
+      }
+
+      function showRouletteResult(result) {
+        showCoupon(rouletteCoupon, { prize: PRIZES[result.index].coupon, code: result.code, date: result.date });
+      }
+
+      function spin() {
+        spinBtn.disabled = true;
+        rouletteCoupon.classList.remove("show");
+        const index = pickIndex();
+        // index番目の景品の中心をポインタ(真上)に止める。何周か余分に回して勢いを出す
+        const target = Math.PI * 2 * 6 + (Math.PI * 2 - index * SLICE);
+        const base = rotation;
+        const delta = target - (rotation % (Math.PI * 2));
+        const duration = 4500;
+        const t0 = performance.now();
+        function frame(now) {
+          const t = Math.min(1, (now - t0) / duration);
+          rotation = base + delta * (1 - Math.pow(1 - t, 4));
+          drawWheel();
+          if (t < 1) {
+            requestAnimationFrame(frame);
+            return;
+          }
+          const result = { index, code: makeCode(), date: todayText() };
+          if (CAN_PLAY_ONCE) save(ROULETTE_KEY, result);
+          showRouletteResult(result);
+          if (CAN_PLAY_ONCE) {
+            spinBtn.textContent = "今日はプレイ済みです";
+          } else {
+            spinBtn.disabled = false;
+            spinBtn.textContent = "もう一度回す";
+          }
+        }
+        requestAnimationFrame(frame);
+      }
+      spinBtn.addEventListener("click", spin);
+
+      drawWheel();
+      const savedRoulette = CAN_PLAY_ONCE ? loadSaved(ROULETTE_KEY) : null;
+      if (savedRoulette) {
+        // 遊んだ後に開き直しても、同じ結果(クーポン)を出す
+        rotation = Math.PI * 2 - savedRoulette.index * SLICE;
+        drawWheel();
+        showRouletteResult(savedRoulette);
+        spinBtn.disabled = true;
+        spinBtn.textContent = "今日はプレイ済みです";
+      }
+
+      // ===== アンケート =====
+      const SURVEY_KEY = "izakaya-survey-result";
+      const surveyForm = document.getElementById("survey-form");
+      const surveyError = document.getElementById("survey-error");
+      const surveySubmit = document.getElementById("survey-submit");
+      const surveyCoupon = document.getElementById("survey-coupon");
+
+      surveyForm.innerHTML = SURVEY.map(
+        (item, i) => `
+          <div class="question">
+            <h2>Q${i + 1}. ${escapeHtml(item.q)}</h2>
+            ${item.options
+              .map((o) => `<label class="option"><input type="radio" name="q${i}" value="${escapeHtml(o)}" />${escapeHtml(o)}</label>`)
+              .join("")}
+          </div>`,
+      ).join("");
+
+      function lockSurvey() {
+        surveySubmit.disabled = true;
+        surveySubmit.textContent = "今日は回答済みです";
+        surveyForm.querySelectorAll("input").forEach((input) => (input.disabled = true));
+      }
+
+      surveySubmit.addEventListener("click", () => {
+        const unanswered = SURVEY.findIndex((_, i) => !surveyForm.querySelector(`input[name="q${i}"]:checked`));
+        if (unanswered >= 0) {
+          surveyError.textContent = `Q${unanswered + 1} が未回答です`;
+          return;
+        }
+        surveyError.textContent = "";
+        const result = { code: makeCode(), date: todayText() };
+        if (CAN_PLAY_ONCE) save(SURVEY_KEY, result);
+        showCoupon(surveyCoupon, { title: "ご協力ありがとうございます!", prize: SURVEY_COUPON, ...result });
+        if (CAN_PLAY_ONCE) lockSurvey();
+        surveyCoupon.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+
+      const savedSurvey = CAN_PLAY_ONCE ? loadSaved(SURVEY_KEY) : null;
+      if (savedSurvey) {
+        showCoupon(surveyCoupon, { title: "ご協力ありがとうございます!", prize: SURVEY_COUPON, ...savedSurvey });
+        lockSurvey();
+      }
+    </script>
+  </body>
+</html>
