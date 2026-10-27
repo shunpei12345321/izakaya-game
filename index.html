@@ -21,6 +21,19 @@
         text-align: center;
       }
       h1 { margin: 0; font-size: 24px; letter-spacing: 0.04em; }
+      .sound-toggle {
+        position: fixed;
+        top: max(10px, env(safe-area-inset-top));
+        right: 12px;
+        width: 44px;
+        height: 44px;
+        border: 0;
+        border-radius: 50%;
+        font-size: 22px;
+        color: #fff;
+        background: rgba(255, 244, 236, 0.15);
+        touch-action: manipulation;
+      }
       .lead { margin: 0; font-size: 15px; color: #f0cdb6; }
       .tabs { display: flex; gap: 8px; width: min(92vw, 380px); }
       .tab {
@@ -97,6 +110,7 @@
     </style>
   </head>
   <body>
+    <button class="sound-toggle" id="sound-toggle" type="button" aria-label="効果音のオン・オフ">🔊</button>
     <h1>🍺 居酒屋ゲーム</h1>
     <p class="lead">遊んで、お得なクーポンをゲットしよう!</p>
     <div class="tabs">
@@ -140,6 +154,55 @@
       ];
       const SURVEY_COUPON = "ドリンク1杯無料";
       const CAN_PLAY_ONCE = false; // false: 何度でも遊べる(サーバーが無いので、デモ向けの設定)。true: 1台のスマホで、それぞれ1日1回だけ
+
+      // ===== 効果音(WebAudio。音声ファイルは使わない) =====
+      // iPhone は、画面をタップした操作の中でしか音を出せない。ボタンを押したときに初めて AudioContext を作る。
+      // ※ 消音スイッチ(サイレントモード)がオンだと鳴らない
+      const SOUND_KEY = "izakaya-sound";
+      let soundOn = true;
+      try { soundOn = localStorage.getItem(SOUND_KEY) !== "off"; } catch {}
+      let audioCtx = null;
+      const soundBtn = document.getElementById("sound-toggle");
+      soundBtn.textContent = soundOn ? "🔊" : "🔇";
+      soundBtn.addEventListener("click", () => {
+        soundOn = !soundOn;
+        soundBtn.textContent = soundOn ? "🔊" : "🔇";
+        try { localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off"); } catch {}
+        if (soundOn) playTone(880, 0, 0.12, "sine", 0.25); // オンにした確認音
+      });
+
+      function unlockAudio() {
+        if (!audioCtx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (Ctx) audioCtx = new Ctx();
+        }
+        if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+      }
+      document.addEventListener("pointerdown", unlockAudio);
+
+      // freq(Hz)の音を、delay秒後に dur 秒だけ鳴らす
+      function playTone(freq, delay, dur, type = "sine", volume = 0.3) {
+        if (!soundOn || !audioCtx || audioCtx.state !== "running") return;
+        const t0 = audioCtx.currentTime + delay;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.05);
+      }
+      // ルーレットの「カチッ」(仕切りを通るたび)
+      const sfxTick = () => playTone(1400, 0, 0.04, "square", 0.08);
+      // 当たり: 明るい上昇のファンファーレ
+      const sfxWin = () => [523.3, 659.3, 784, 1046.5].forEach((f, i) => playTone(f, i * 0.12, 0.35, "triangle", 0.3));
+      // ハズレ: 低く下がる2音
+      const sfxLose = () => [330, 247].forEach((f, i) => playTone(f, i * 0.22, 0.4, "sine", 0.28));
+      // クーポンが出たとき(アンケート)の「ピンポーン」
+      const sfxChime = () => [880, 1318.5].forEach((f, i) => playTone(f, i * 0.16, 0.5, "sine", 0.3));
 
       // ===== 共通 =====
       function todayText() {
@@ -260,6 +323,7 @@
       }
 
       function spin() {
+        unlockAudio(); // タップの操作の中で音を使えるようにする
         spinBtn.disabled = true;
         rouletteCoupon.classList.remove("show");
         const index = pickIndex();
@@ -269,10 +333,16 @@
         const delta = target - (rotation % (Math.PI * 2));
         const duration = 4500;
         const t0 = performance.now();
+        let lastSlice = Math.floor((rotation + SLICE / 2) / SLICE);
         function frame(now) {
           const t = Math.min(1, (now - t0) / duration);
           rotation = base + delta * (1 - Math.pow(1 - t, 4));
           drawWheel();
+          const slice = Math.floor((rotation + SLICE / 2) / SLICE);
+          if (slice !== lastSlice) {
+            lastSlice = slice;
+            sfxTick();
+          }
           if (t < 1) {
             requestAnimationFrame(frame);
             return;
@@ -280,6 +350,7 @@
           const result = { index, code: makeCode(), date: todayText() };
           if (CAN_PLAY_ONCE) save(ROULETTE_KEY, result);
           showRouletteResult(result);
+          (PRIZES[index].coupon ? sfxWin : sfxLose)();
           if (CAN_PLAY_ONCE) {
             spinBtn.textContent = "今日はプレイ済みです";
           } else {
@@ -327,6 +398,7 @@
 
       let surveyDone = false;
       surveySubmit.addEventListener("click", () => {
+        unlockAudio();
         if (surveyDone) {
           // 「もう一度答える」: 入力とクーポンを消して最初に戻す
           surveyForm.reset();
@@ -345,6 +417,7 @@
         const result = { code: makeCode(), date: todayText() };
         if (CAN_PLAY_ONCE) save(SURVEY_KEY, result);
         showCoupon(surveyCoupon, { title: "ご協力ありがとうございます!", prize: SURVEY_COUPON, ...result });
+        sfxChime();
         if (CAN_PLAY_ONCE) {
           lockSurvey();
         } else {
