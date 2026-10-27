@@ -139,7 +139,7 @@
         { q: "今日のお店の満足度は?", options: ["とても満足", "満足", "ふつう", "もう少し"] },
       ];
       const SURVEY_COUPON = "ドリンク1杯無料";
-      const CAN_PLAY_ONCE = true; // 1台のスマホで、それぞれ1日1回だけ(デモで何度も試したいときは false)
+      const CAN_PLAY_ONCE = false; // false: 何度でも遊べる(サーバーが無いので、デモ向けの設定)。true: 1台のスマホで、それぞれ1日1回だけ
 
       // ===== 共通 =====
       function todayText() {
@@ -325,7 +325,17 @@
         surveyForm.querySelectorAll("input").forEach((input) => (input.disabled = true));
       }
 
+      let surveyDone = false;
       surveySubmit.addEventListener("click", () => {
+        if (surveyDone) {
+          // 「もう一度答える」: 入力とクーポンを消して最初に戻す
+          surveyForm.reset();
+          surveyCoupon.classList.remove("show");
+          surveyDone = false;
+          surveySubmit.textContent = "回答してクーポンをもらう";
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
         const unanswered = SURVEY.findIndex((_, i) => !surveyForm.querySelector(`input[name="q${i}"]:checked`));
         if (unanswered >= 0) {
           surveyError.textContent = `Q${unanswered + 1} が未回答です`;
@@ -335,7 +345,12 @@
         const result = { code: makeCode(), date: todayText() };
         if (CAN_PLAY_ONCE) save(SURVEY_KEY, result);
         showCoupon(surveyCoupon, { title: "ご協力ありがとうございます!", prize: SURVEY_COUPON, ...result });
-        if (CAN_PLAY_ONCE) lockSurvey();
+        if (CAN_PLAY_ONCE) {
+          lockSurvey();
+        } else {
+          surveyDone = true;
+          surveySubmit.textContent = "もう一度答える";
+        }
         surveyCoupon.scrollIntoView({ behavior: "smooth", block: "center" });
       });
 
